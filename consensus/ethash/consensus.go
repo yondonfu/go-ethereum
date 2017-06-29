@@ -289,13 +289,14 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainReader, header, parent *
 //
 // TODO (karalabe): Move the chain maker into this package and make this private!
 func CalcDifficulty(config *params.ChainConfig, time uint64, parent *types.Header) *big.Int {
-	next := new(big.Int).Add(parent.Number, common.Big1)
-	switch {
-	case config.IsHomestead(next):
-		return calcDifficultyHomestead(time, parent)
-	default:
-		return calcDifficultyFrontier(time, parent)
-	}
+	return parent.Difficulty
+	// next := new(big.Int).Add(parent.Number, common.Big1)
+	// switch {
+	// case config.IsHomestead(next):
+	// 	return calcDifficultyHomestead(time, parent)
+	// default:
+	// 	return calcDifficultyFrontier(time, parent)
+	// }
 }
 
 // Some weird constants to avoid constant memory allocs for them.
