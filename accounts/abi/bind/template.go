@@ -52,7 +52,7 @@ var tmplSource = map[Lang]string{
 // tmplSourceGo is the Go source template use to generate the contract binding
 // based on.
 const tmplSourceGo = `
-// Code generated - DO NOT EDIT
+// Code generated - DO NOT EDIT.
 // This file is a generated binding and any manual changes will be lost.
 
 package {{.Package}}
