@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -31,6 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
@@ -385,7 +387,8 @@ func dump(ctx *cli.Context) error {
 			fmt.Println("{}")
 			utils.Fatalf("block not found")
 		} else {
-			state, err := state.New(block.Root(), state.NewDatabase(chainDb))
+			// Default reexec = 128
+			state, err := computeStateDB(chain, chainDb, block, uint64(128))
 			if err != nil {
 				utils.Fatalf("could not create new state: %v", err)
 			}
@@ -400,6 +403,69 @@ func dump(ctx *cli.Context) error {
 	}
 	chainDb.Close()
 	return nil
+}
+
+func computeStateDB(chain *core.BlockChain, chainDb ethdb.Database, block *types.Block, reexec uint64) (*state.StateDB, error) {
+	// If we have the state fully available, use that
+	statedb, err := chain.StateAt(block.Root())
+	if err == nil {
+		return statedb, nil
+	}
+	// Otherwise try to reexec blocks until we find a state or reach our limit
+	origin := block.NumberU64()
+	database := state.NewDatabase(chainDb)
+
+	for i := uint64(0); i < reexec; i++ {
+		block = chain.GetBlock(block.ParentHash(), block.NumberU64()-1)
+		if block == nil {
+			break
+		}
+		if statedb, err = state.New(block.Root(), database); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		switch err.(type) {
+		case *trie.MissingNodeError:
+			return nil, errors.New("required historical state unavailable")
+		default:
+			return nil, err
+		}
+	}
+	// State was available at historical point, regenerate
+	var (
+		start  = time.Now()
+		logged time.Time
+		proot  common.Hash
+	)
+	for block.NumberU64() < origin {
+		// Print progress logs if long enough time elapsed
+		if time.Since(logged) > 8*time.Second {
+			log.Info("Regenerating historical state", "block", block.NumberU64()+1, "target", origin, "elapsed", time.Since(start))
+			logged = time.Now()
+		}
+		// Retrieve the next block to regenerate and process it
+		if block = chain.GetBlockByNumber(block.NumberU64() + 1); block == nil {
+			return nil, fmt.Errorf("block #%d not found", block.NumberU64()+1)
+		}
+		_, _, _, err := chain.Processor().Process(block, statedb, vm.Config{})
+		if err != nil {
+			return nil, err
+		}
+		// Finalize the state so any modifications are written to the trie
+		root, err := statedb.Commit(true)
+		if err != nil {
+			return nil, err
+		}
+		if err := statedb.Reset(root); err != nil {
+			return nil, err
+		}
+		database.TrieDB().Reference(root, common.Hash{})
+		database.TrieDB().Dereference(proot, common.Hash{})
+		proot = root
+	}
+	log.Info("Historical state regenerated", "block", block.NumberU64(), "elapsed", time.Since(start), "size", database.TrieDB().Size())
+	return statedb, nil
 }
 
 // hashish returns true for strings that look like hashes.
