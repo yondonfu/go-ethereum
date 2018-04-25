@@ -387,8 +387,7 @@ func dump(ctx *cli.Context) error {
 			fmt.Println("{}")
 			utils.Fatalf("block not found")
 		} else {
-			// Default reexec = 128
-			state, err := computeStateDB(chain, chainDb, block, uint64(128))
+			state, err := computeStateDB(chain, chainDb, block, uint64(5264265))
 			if err != nil {
 				utils.Fatalf("could not create new state: %v", err)
 			}
